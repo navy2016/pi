@@ -1376,7 +1376,7 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 		chatTemplateKwargs: {},
 		zaiToolStream: false,
 		supportsStrictMode: !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia,
-		supportsGrammarTools: provider === "openai",
+		supportsGrammarTools: false,
 		cacheControlFormat,
 		sendSessionAffinityHeaders: false,
 		supportsLongCacheRetention: !(
