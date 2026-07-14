@@ -1,0 +1,124 @@
+name: Build Bun Alpine musl binary
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: 'Source ref to build, e.g. main, v0.80.6, or a commit SHA'
+        required: false
+        type: string
+      target:
+        description: 'Bun compile target'
+        required: false
+        default: bun-linux-arm64-musl
+        type: choice
+        options:
+          - bun-linux-arm64-musl
+          - bun-linux-x64-musl
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bun-alpine-musl-${{ github.event.inputs.source_ref || github.ref_name }}-${{ github.event.inputs.target || 'bun-linux-arm64-musl' }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ github.event.inputs.target || 'bun-linux-arm64-musl' }}
+    runs-on: ubuntu-latest
+    env:
+      SOURCE_REF: ${{ github.event.inputs.source_ref || github.ref_name }}
+      TARGET: ${{ github.event.inputs.target || 'bun-linux-arm64-musl' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.SOURCE_REF }}
+          persist-credentials: false
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build packages
+        run: npm run build
+
+      - name: Compile Bun musl binary
+        working-directory: packages/coding-agent
+        run: |
+          set -euo pipefail
+
+          case "${TARGET}" in
+            bun-linux-arm64-musl)
+              platform="linux-arm64-musl"
+              ;;
+            bun-linux-x64-musl)
+              platform="linux-x64-musl"
+              ;;
+            *)
+              echo "Unsupported target: ${TARGET}" >&2
+              exit 1
+              ;;
+          esac
+
+          out_dir="binaries/${platform}"
+          rm -rf binaries
+          mkdir -p "${out_dir}"
+
+          # Compile a musl-linked Bun executable that can run on Alpine.
+          # image-resize-worker.ts is an explicit entrypoint so Bun embeds it.
+          bun build --compile --target="${TARGET}" \
+            ./dist/bun/cli.js ./src/utils/image-resize-worker.ts \
+            --outfile "${out_dir}/pi"
+
+          chmod +x "${out_dir}/pi"
+
+          # Runtime assets expected by config.ts in Bun binary mode.
+          cp package.json "${out_dir}/"
+          cp README.md "${out_dir}/"
+          cp CHANGELOG.md "${out_dir}/"
+          cp ../../node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm "${out_dir}/"
+
+          mkdir -p "${out_dir}/theme"
+          cp src/modes/interactive/theme/*.json "${out_dir}/theme/"
+
+          mkdir -p "${out_dir}/assets"
+          cp src/modes/interactive/assets/*.png "${out_dir}/assets/"
+
+          mkdir -p "${out_dir}/export-html/vendor"
+          cp src/core/export-html/template.html "${out_dir}/export-html/"
+          cp src/core/export-html/vendor/*.js "${out_dir}/export-html/vendor/"
+
+          cp -r docs "${out_dir}/"
+          cp -r examples "${out_dir}/"
+
+          # Do not copy the glibc clipboard native package into musl builds.
+          # Clipboard is optional; excluding it keeps this artifact Alpine-safe.
+
+          tar_dir="binaries/archive"
+          mkdir -p "${tar_dir}"
+          archive="pi-${platform}.tar.gz"
+          (cd binaries && mv "${platform}" pi && tar -czf "archive/${archive}" pi && mv pi "${platform}")
+
+          sha256sum "${tar_dir}/${archive}" "${out_dir}/pi" > "${tar_dir}/SHA256SUMS"
+
+      - name: Upload Alpine musl artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pi-${{ env.TARGET }}
+          path: |
+            packages/coding-agent/binaries/archive/*
+            packages/coding-agent/binaries/linux-*-musl/pi
+          if-no-files-found: error
+          retention-days: 14
