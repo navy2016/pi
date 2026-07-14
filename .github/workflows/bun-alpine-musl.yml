@@ -78,7 +78,10 @@ jobs:
 
           # Compile a musl-linked Bun executable that can run on Alpine.
           # image-resize-worker.ts is an explicit entrypoint so Bun embeds it.
-          bun build --compile --target="${TARGET}" \
+          bun build --compile --bytecode \
+            --no-compile-autoload-dotenv \
+            --no-compile-autoload-bunfig \
+            --target="${TARGET}" \
             ./dist/bun/cli.js ./src/utils/image-resize-worker.ts \
             --outfile "${out_dir}/pi"
 
