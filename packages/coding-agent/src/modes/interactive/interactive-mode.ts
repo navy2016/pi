@@ -808,7 +808,7 @@ export class InteractiveMode {
 		this.ui.requestRender();
 
 		// Initialize extensions first so resources are shown before messages
-		await this.rebindCurrentSession();
+		await this.rebindCurrentSession({ updateAvailableProviderCount: false });
 
 		// Render initial messages AFTER showing loaded resources
 		this.renderInitialMessages();
@@ -825,8 +825,8 @@ export class InteractiveMode {
 			this.ui.requestRender();
 		});
 
-		// Initialize available provider count for footer display
-		await this.updateAvailableProviderCount();
+		// Initialize available provider count for footer display without blocking first paint.
+		void this.updateAvailableProviderCount().then(() => this.ui.requestRender());
 	}
 
 	/**
@@ -1720,7 +1720,9 @@ export class InteractiveMode {
 		}
 	}
 
-	private async rebindCurrentSession(options: { renderBeforeBind?: boolean } = {}): Promise<void> {
+	private async rebindCurrentSession(
+		options: { renderBeforeBind?: boolean; updateAvailableProviderCount?: boolean } = {},
+	): Promise<void> {
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
 		this.applyRuntimeSettings();
@@ -1732,7 +1734,9 @@ export class InteractiveMode {
 			await this.bindCurrentSessionExtensions();
 			this.subscribeToAgent();
 		}
-		await this.updateAvailableProviderCount();
+		if (options.updateAvailableProviderCount !== false) {
+			await this.updateAvailableProviderCount();
+		}
 		this.updateEditorBorderColor();
 		this.updateTerminalTitle();
 	}
